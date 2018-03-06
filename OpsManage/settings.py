@@ -13,23 +13,46 @@ https://docs.djangoproject.com/en/1.9/ref/settings/
 import os
 import djcelery
 from celery import  platforms
-
+from kombu import Queue,Exchange
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 ''' celery config '''
 djcelery.setup_loader()
-BROKER_URL = 'redis://192.168.88.233:6379/3'
+BROKER_URL = 'redis://192.168.88.233:6379/4'
 CELERY_RESULT_BACKEND = 'djcelery.backends.database.DatabaseBackend'
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'pickle'
-CELERY_ACCEPT_CONTENT = ['json', 'pickle']
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TASK_SERIALIZER='pickle'
+CELERY_ACCEPT_CONTENT = ['pickle','json']
 CELERYBEAT_SCHEDULER = 'djcelery.schedulers.DatabaseScheduler'
 CELERY_TASK_RESULT_EXPIRES = 60 * 60 * 24
 CELERYD_MAX_TASKS_PER_CHILD = 40
 CELERY_TRACK_STARTED = True
+CELERY_ENABLE_UTC = False
 CELERY_TIMEZONE='Asia/Shanghai'
 platforms.C_FORCE_ROOT = True
+
+#celery route config
+CELERY_IMPORTS = ("OpsManage.tasks.assets","OpsManage.tasks.ansible",
+                  "OpsManage.tasks.cron","OpsManage.tasks.deploy",
+                  "OpsManage.tasks.sql","OpsManage.tasks.sched")
+CELERY_QUEUES = (
+    Queue('default',Exchange('default'),routing_key='default'),
+    Queue('ansible',Exchange('ansible'),routing_key='ansible_#'),
+)
+CELERY_ROUTES = {
+    'OpsManage.tasks.sql.*':{'queue':'default','routing_key':'default'},
+    'OpsManage.tasks.assets.*':{'queue':'default','routing_key':'default'},
+    'OpsManage.tasks.cron.*':{'queue':'default','routing_key':'default'},
+    'OpsManage.tasks.sched.*':{'queue':'default','routing_key':'default'},
+    'OpsManage.tasks.ansible.AnsibleScripts':{'queue':'ansible','routing_key':'ansible_scripts'},
+    'OpsManage.tasks.ansible.AnsiblePlayBook':{'queue':'ansible','routing_key':'ansible_playbook'},
+}
+CELERY_DEFAULT_QUEUE = 'default'
+CELERY_DEFAULT_EXCHANGE_TYPE = 'direct'
+CELERY_DEFAULT_ROUTING_KEY = 'default'
+
+
 
 REDSI_KWARGS_LPUSH = {"host":'192.168.88.233','port':6379,'db':3}
 REDSI_LPUSH_POOL = None
@@ -45,6 +68,22 @@ DEBUG = True
 ALLOWED_HOSTS = ['*']
 
 
+# Channels settings
+CHANNEL_LAYERS = {
+    "default": {
+       "BACKEND": "asgi_redis.RedisChannelLayer",  # use redis backend
+       "CONFIG": {
+           "hosts": [("localhost", 6379)],  # set redis address
+           "channel_capacity": {
+                                   "http.request": 1000,
+                                   "websocket.send*": 10000,
+                                },
+           "capacity": 10000,           
+           },
+       "ROUTING": "OpsManage.routing.channel_routing",  # load routing from our routing.py file
+       },
+}
+
 # Application definition
 
 INSTALLED_APPS = (
@@ -56,7 +95,8 @@ INSTALLED_APPS = (
     'django.contrib.staticfiles',
     'OpsManage',
     'rest_framework',
-    'djcelery'
+    'djcelery',
+    'channels',
 )
 
 MIDDLEWARE_CLASSES = (
@@ -74,28 +114,32 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
-#     'DEFAULT_FILTER_BACKENDS': ('rest_framework.filters.DjangoFilterBackend',
-#     ),              
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_jwt.authentication.JSONWebTokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.BasicAuthentication',
+    ),             
 }
 
 
 ROOT_URLCONF = 'OpsManage.urls'
 
-# TEMPLATES = [
-#     {
-#         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-#         'DIRS': ["E:\\MyPros\\OpsManage\\OpsManage\\static\\"],
-#         'APP_DIRS': True,
-#         'OPTIONS': {
-#             'context_processors': [
-#                 'django.template.context_processors.debug',
-#                 'django.template.context_processors.request',
-#                 'django.contrib.auth.context_processors.auth',
-#                 'django.contrib.messages.context_processors.messages',
-#             ],
-#         },
-#     },
-# ]
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': ["/mnt/OpsManage/OpsManage/static/",'/mnt/OpsManage/OpsManage/templates/'],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
 
 WSGI_APPLICATION = 'OpsManage.wsgi.application'
 
@@ -141,11 +185,11 @@ LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'Asia/Shanghai'
 
-USE_I18N = True
+# USE_I18N = True
+# 
+# USE_L10N = True
 
-USE_L10N = True
-
-USE_TZ = False
+# USE_TZ = False
 
 
 # Static files (CSS, JavaScript, Images)
@@ -155,10 +199,10 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = (
      '/mnt/OpsManage/OpsManage/static/',
     )
-TEMPLATE_DIRS = (
-#     os.path.join(BASE_DIR,'mysite\templates'),
-    '/mnt/OpsManage/OpsManage/templates/',
-)
+# TEMPLATE_DIRS = (
+# #     os.path.join(BASE_DIR,'mysite\templates'),
+#     '/mnt/OpsManage/OpsManage/templates/',
+# )
 
 
 LOGIN_URL = '/login'
