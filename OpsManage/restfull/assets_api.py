@@ -10,6 +10,8 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from OpsManage.tasks.assets import recordAssets
 from django.contrib.auth.decorators import permission_required
+from OpsManage.utils.logger import logger
+
 
 
 @api_view(['GET', 'POST' ])
@@ -74,6 +76,7 @@ def service_list(request,format=None):
             serializer = ServiceSerializer(snippet)
             recordAssets.delay(user=str(request.user),content="添加业务类型名称：{service_name}".format(service_name=request.data.get("service_name")),type="service",id=serializer.data.get('id'))
         except Exception, ex:
+            logger.error(msg="添加service失败: {ex}".format(ex=str(ex)))
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)  
         return Response(serializer.data)        
 #         serializer = ServiceSerializer(data=request.data)
@@ -185,7 +188,7 @@ def group_detail(request, id,format=None):
         if not request.user.has_perm('Opsmanage.delete_group'):  
             return Response(status=status.HTTP_403_FORBIDDEN)
         snippet.delete()
-        recordAssets.delay(user=str(request.user),content="删除用户组：{group_name}".format(group_name=snippet.group_name),type="group",id=id)        
+        recordAssets.delay(user=str(request.user),content="删除用户组：{group_name}".format(group_name=snippet.name),type="group",id=id)        
         return Response(status=status.HTTP_204_NO_CONTENT)     
 
 @api_view(['GET', 'POST' ])

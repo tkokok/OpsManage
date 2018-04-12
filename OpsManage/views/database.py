@@ -1,6 +1,6 @@
 #!/usr/bin/env python  
 # _#_ coding:utf-8 _*_  
-import json,re,csv
+import json,re,csv,os
 from django.http import JsonResponse,HttpResponseRedirect
 from django.shortcuts import render
 from django.contrib.auth.models import User,Group
@@ -17,8 +17,9 @@ from OpsManage.utils.inception import Inception
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from OpsManage.data.base import MySQLPool
 from OpsManage.utils.binlog2sql import Binlog2sql
-from OpsManage.utils import base
+from OpsManage.utils import base,mysql
 from django.http import StreamingHttpResponse,HttpResponse
+from OpsManage.utils.logger import logger
 
 @login_required()
 @permission_required('OpsManage.can_add_database_server_config',login_url='/noperm/')
@@ -39,12 +40,12 @@ def db_config(request):
             for g in groupList:
                 if g.id in audit_group:g.count = 1
         except Exception,ex:
-            print ex
+            logger.warn(msg="获取SQL审核配置信息失败: {ex}".format(ex=str(ex)))
             config = None
         try:
             incept = Inception_Server_Config.objects.get(id=1)
         except Exception, ex:
-            print ex
+            logger.warn(msg="获取Inception服务器信息失败: {ex}".format(ex=str(ex)))
             incept = None
         return render(request,'database/db_config.html',{"user":request.user,"incept":incept,
                                                         "dataBaseList":dataBaseList,"sqlList":sqlList,
@@ -74,7 +75,7 @@ def db_sqlorder_audit(request):
             serviceList = Service_Assets.objects.all()
             projectList = Project_Assets.objects.all()
         except Exception, ex:
-            print ex
+            logger.warn(msg="获取SQL审核配置信息失败: {ex}".format(ex=str(ex)))
         return render(request,'database/db_sqlorder_audit.html',{"user":request.user,"dataBaseList":dataBaseList,"userList":userList,
                                                                  "serviceList":serviceList,"projectList":projectList})
     elif request.method == "POST":
@@ -84,43 +85,67 @@ def db_sqlorder_audit(request):
                 return  JsonResponse({'msg':"审核失败，工单（{desc}）已经存在".format(desc=request.POST.get('order_desc')),"code":500,'data':[]})
             try:
                 db = DataBase_Server_Config.objects.get(id=int(dbId))
-                incept = Inception(
-                                   host=db.db_host,name=db.db_name,
-                                   user=db.db_user,passwd=db.db_passwd,
-                                   port=db.db_port
-                                   )
-                result = incept.checkSql(request.POST.get('order_sql'))
-                if result.get('status') == 'success':
-                    count = 0
-                    sList = []
-                    for ds in result.get('data'):
-                        if ds.get('errlevel') > 0 and ds.get('errmsg'):count = count + 1
-                        sList.append({'sql':ds.get('sql'),'row':ds.get('affected_rows'),'errmsg':ds.get('errmsg')})
-                    if count > 0:return JsonResponse({'msg':"审核失败，请检查SQL语句","code":500,'data':sList})
-                    else:
-                        mask='【已自动授权】'
-                        if config.t_auto_audit == 1 and db.db_env == 'test':order_status = 6
-                        elif config.p_auto_audit == 1 and db.db_env == 'prod':order_status = 6
+            except Exception,ex:
+                logger.error(msg="获取数据库配置信息失败: {ex}".format(ex=str(ex)))
+                return JsonResponse({'msg':str(ex),"code":500,'data':[]})
+            if request.POST.get('order_type') == 'online':
+                try:
+                    incept = Inception(
+                                       host=db.db_host,name=db.db_name,
+                                       user=db.db_user,passwd=db.db_passwd,
+                                       port=db.db_port
+                                       )
+                    result = incept.checkSql(request.POST.get('order_sql'))
+                    if result.get('status') == 'success':
+                        count = 0
+                        sList = []
+                        for ds in result.get('data'):
+                            if ds.get('errlevel') > 0 and ds.get('errmsg'):count = count + 1
+                            sList.append({'sql':ds.get('sql'),'row':ds.get('affected_rows'),'errmsg':ds.get('errmsg')})
+                        if count > 0:return JsonResponse({'msg':"审核失败，请检查SQL语句","code":500,'data':sList})
                         else:
-                            order_status = 1
-                            mask='【申请中】'
-                        try:
-                            order_executor = User.objects.get(id=request.POST.get('order_executor'))
-                            order = SQL_Audit_Order.objects.create(
-                                                       order_apply=request.user.id,order_db=db,
-                                                       order_sql = request.POST.get('order_sql'),
-                                                       order_executor = order_executor.id,
-                                                       order_status = order_status,
-                                                       order_desc =  request.POST.get('order_desc')
-                                                       )  
-                            sendSqlNotice.delay(order.id,mask)                          
-                        except Exception, ex:
-                            return JsonResponse({'msg':str(ex),"code":500,'data':[]})
-                        return JsonResponse({'msg':"审核成功，SQL已经提交","code":200,'data':sList})
-                else:
-                    return JsonResponse({'msg':result.get('errinfo'),"code":500,'data':[]}) 
-            except Exception, ex:
-                return JsonResponse({'msg':str(ex),"code":200,'data':[]})     
+                            mask='【已自动授权】'
+                            if config.t_auto_audit == 1 and db.db_env == 'test':order_status = 6
+                            elif config.p_auto_audit == 1 and db.db_env == 'prod':order_status = 6
+                            else:
+                                order_status = 1
+                                mask='【申请中】'
+                            try:
+                                order_executor = User.objects.get(id=request.POST.get('order_executor'))
+                                order = SQL_Audit_Order.objects.create(
+                                                           order_apply=request.user.id,order_db=db,
+                                                           order_sql = request.POST.get('order_sql'),
+                                                           order_executor = order_executor.id,
+                                                           order_status = order_status,
+                                                           order_type = 'online',
+                                                           order_desc =  request.POST.get('order_desc')
+                                                           )  
+                                sendSqlNotice.delay(order.id,mask)                          
+                            except Exception, ex:
+                                logger.error(msg="SQL审核失败: {ex}".format(ex=str(ex)))
+                                return JsonResponse({'msg':str(ex),"code":500,'data':[]})
+                            return JsonResponse({'msg':"审核成功，SQL已经提交","code":200,'data':sList})
+                    else:
+                        return JsonResponse({'msg':result.get('errinfo'),"code":500,'data':[]}) 
+                except Exception, ex:
+                    return JsonResponse({'msg':str(ex),"code":200,'data':[]})     
+            elif request.POST.get('order_type') == 'file':
+                try:
+                    order_executor = User.objects.get(id=request.POST.get('order_executor'))
+                    order = SQL_Audit_Order.objects.create(
+                                               order_apply=request.user.id,order_db=db,
+                                               order_sql = request.POST.get('order_sql'),
+                                               order_executor = order_executor.id,
+                                               order_status = 1,
+                                               order_type = 'file',
+                                               order_file = request.FILES.get('order_file'),
+                                               order_desc =  request.POST.get('order_desc')
+                                               )  
+                    sendSqlNotice.delay(order.id,mask='【申请中】')                          
+                except Exception, ex:
+                    logger.error(msg="SQL审核失败: {ex}".format(ex=str(ex)))
+                    return JsonResponse({'msg':str(ex),"code":500,'data':[]})
+                return JsonResponse({'msg':"SQL工单已经提交","code":200,'data':[]})                
             
 @login_required()
 @permission_required('OpsManage.can_read_sql_audit_order',login_url='/noperm/')
@@ -136,10 +161,14 @@ def db_sqlorder_list(request,page):
                     if ds.order_executor == request.user.id:ds.perm = 1
                     ds.order_apply = User.objects.get(id=ds.order_apply).username
                     ds.order_executor = User.objects.get(id=ds.order_executor).username
+                    if  ds.order_type=='file':
+                        filePath = os.getcwd() + '/upload/' + str(ds.order_file)
+                        with open(filePath, 'r') as f:
+                            ds.order_sql = f.read(1000)                      
                 except Exception, ex:
-                    pass
+                    logger.warn(msg="获取审核SQL[{id}]错误: {ex}".format(id=ds.id,ex=str(ex)))
         except Exception, ex:
-            print ex
+            logger.warn(msg="获取SQL审核列表错误: {ex}".format(ex=str(ex)))
         totalOrder = SQL_Audit_Order.objects.all().count()
         doneOrder = SQL_Audit_Order.objects.filter(order_status=2).count()
         rollbackOrder = SQL_Audit_Order.objects.filter(order_status=3).count()
@@ -167,7 +196,7 @@ def db_sqlorder_run(request,id):
         if request.user.id != order.order_executor:order.prem = 0
         else:order.prem = 1
     except Exception,ex:
-        print ex
+        logger.error(msg="执行SQL[{id}]错误: {ex}".format(id=id,ex=str(ex)))
         return render(request,'database/db_sqlorder_run.html',{"user":request.user,"errinfo":"工单不存在，或者您没有权限处理这个工单"}) 
     if request.method == "GET":
         oscStatus = None
@@ -175,16 +204,16 @@ def db_sqlorder_run(request,id):
         rollBackSql = []
         order.order_apply = User.objects.get(id=order.order_apply).username
         order.order_executor = User.objects.get(id=order.order_executor).username  
-        inceptRbt = Inception(
-                   host=incept.db_backup_host,name=order.order_db.db_name,
-                   user=order.order_db.db_user,passwd=order.order_db.db_passwd,
-                   port=order.order_db.db_port
-                   )   
         try:
             order.order_db.db_service = Service_Assets.objects.get(id=order.order_db.db_service)
         except Exception, ex:
             order.order_db.db_service = '未知'
-        if order.order_status in [2,3,7]:       
+        if order.order_status in [2,3,7] and order.order_type=='online':   
+            inceptRbt = Inception(
+                       host=incept.db_backup_host,name=order.order_db.db_name,
+                       user=order.order_db.db_user,passwd=order.order_db.db_passwd,
+                       port=order.order_db.db_port
+                       )                  
             sqlResultList = SQL_Order_Execute_Result.objects.filter(order=order)
             for ds in sqlResultList:
                 if ds.backup_db.find('None') == -1:
@@ -206,7 +235,11 @@ def db_sqlorder_run(request,id):
                         rollBackSql = ["Ops！数据库服务器 - {host} 可能未开启binlog或者未开启备份功能，获取回滚SQL失败。".format(host=order.order_db.db_host,dbname=order.order_db.db_name)]
                         return render(request,'database/db_sqlorder_run.html',{"user":request.user,"order":order,"sqlResultList":sqlResultList,"rollBackSql":rollBackSql,"rbkSql":0,"oscStatus":oscStatus})  
                     if rbkSql.get('status') == 'success' and rbkSql.get('data'): 
-                        rollBackSql.append(rbkSql.get('data')[0])     
+                        rollBackSql.append(rbkSql.get('data')[0])  
+        elif  order.order_type=='file':
+            filePath = os.getcwd() + '/upload/' + str(order.order_file)
+            with open(filePath, 'r') as f:
+                order.order_sql = f.read()               
         return render(request,'database/db_sqlorder_run.html',{"user":request.user,"order":order,"sqlResultList":sqlResultList,"rollBackSql":rollBackSql,"oscStatus":oscStatus}) 
     
     elif request.method == "POST":
@@ -215,56 +248,74 @@ def db_sqlorder_run(request,id):
                 count = SQL_Order_Execute_Result.objects.filter(order=order).count() 
                 if count > 0:return JsonResponse({'msg':"该SQL已经被执行过，请勿重复执行","code":500,'data':[]})
             except Exception,ex:
-                print ex
-                pass            
-            try:
-                config = SQL_Audit_Control.objects.get(id=1)
-                incept = Inception(
-                                   host=order.order_db.db_host,name=order.order_db.db_name,
-                                   user=order.order_db.db_user,passwd=order.order_db.db_passwd,
-                                   port=order.order_db.db_port
-                                   )
-                if config.t_backup_sql == 0 and order.order_db.db_env == 'test':action = '--disable-remote-backup;'
-                elif config.p_backup_sql == 0 and order.order_db.db_env == 'prod':action = '--disable-remote-backup;'
-                else:action = None
-                result = incept.execSql(order.order_sql,action)
-                if result.get('status') == 'success':
-                    count = 0
-                    sList = []
-                    for ds in result.get('data'):
-                        try:                            
-                            SQL_Order_Execute_Result.objects.create(
-                                                                    order = order,
-                                                                    errlevel = ds.get('errlevel'),
-                                                                    stage = ds.get('stage'),
-                                                                    stagestatus = ds.get('stagestatus'),
-                                                                    errormessage = ds.get('errmsg'),
-                                                                    sqltext =  ds.get('sql'),
-                                                                    affectrow = ds.get('affected_rows'),
-                                                                    sequence = ds.get('sequence'),
-                                                                    backup_db = ds.get('backup_dbname'),
-                                                                    execute_time = ds.get('execute_time'),
-                                                                    sqlsha = ds.get('sqlsha1'),
-                                                                    )
-                        except Exception, ex:
-                            print ex
-                            pass
-                        if ds.get('errlevel') > 0 and ds.get('errmsg'):count = count + 1
-                        sList.append({'sql':ds.get('sql'),'row':ds.get('affected_rows'),'errmsg':ds.get('errmsg')})
-                    if count > 0:
-                        order.order_status = 7
-                        order.save()      
-                        sendSqlNotice.delay(order.id,mask='【执行失败】')                   
-                        return JsonResponse({'msg':"执行失败，请检查SQL语句","code":500,'data':sList})
+                logger.warn(msg="执行SQL[{id}]错误: {ex}".format(id=id,ex=str(ex)))
+                pass 
+            if  order.order_type == 'online':          
+                try:
+                    config = SQL_Audit_Control.objects.get(id=1)
+                    incept = Inception(
+                                       host=order.order_db.db_host,name=order.order_db.db_name,
+                                       user=order.order_db.db_user,passwd=order.order_db.db_passwd,
+                                       port=order.order_db.db_port
+                                       )
+                    if config.t_backup_sql == 0 and order.order_db.db_env == 'test':action = '--disable-remote-backup;'
+                    elif config.p_backup_sql == 0 and order.order_db.db_env == 'prod':action = '--disable-remote-backup;'
+                    else:action = None
+                    result = incept.execSql(order.order_sql,action)
+                    if result.get('status') == 'success':
+                        count = 0
+                        sList = []
+                        for ds in result.get('data'):
+                            try:                            
+                                SQL_Order_Execute_Result.objects.create(
+                                                                        order = order,
+                                                                        errlevel = ds.get('errlevel'),
+                                                                        stage = ds.get('stage'),
+                                                                        stagestatus = ds.get('stagestatus'),
+                                                                        errormessage = ds.get('errmsg'),
+                                                                        sqltext =  ds.get('sql'),
+                                                                        affectrow = ds.get('affected_rows'),
+                                                                        sequence = ds.get('sequence'),
+                                                                        backup_db = ds.get('backup_dbname'),
+                                                                        execute_time = ds.get('execute_time'),
+                                                                        sqlsha = ds.get('sqlsha1'),
+                                                                        )
+                            except Exception, ex:
+                                pass
+                            if ds.get('errlevel') > 0 and ds.get('errmsg'):count = count + 1
+                            sList.append({'sql':ds.get('sql'),'row':ds.get('affected_rows'),'errmsg':ds.get('errmsg')})
+                        if count > 0:
+                            order.order_status = 7
+                            order.save()      
+                            sendSqlNotice.delay(order.id,mask='【执行失败】')                   
+                            return JsonResponse({'msg':"执行失败，请检查SQL语句","code":500,'data':sList})
+                        else:
+                            order.order_status = 2
+                            order.save()
+                            sendSqlNotice.delay(order.id,mask='【已执行】') 
+                            return JsonResponse({'msg':"SQL执行成功","code":200,'data':sList})
                     else:
-                        order.order_status = 2
-                        order.save()
-                        sendSqlNotice.delay(order.id,mask='【已执行】') 
-                        return JsonResponse({'msg':"SQL执行成功","code":200,'data':sList})
+                        return JsonResponse({'msg':result.get('errinfo'),"code":500,'data':[]}) 
+                except Exception, ex:
+                    logger.error(msg="执行SQL[{id}]错误: {ex}".format(id=id,ex=str(ex)))
+                    return JsonResponse({'msg':str(ex),"code":200,'data':[]})  
+            elif order.order_type == 'file':
+                filePath = os.getcwd() + '/upload/' + str(order.order_file)
+                rc,rs = mysql.loads(    
+                                    host=order.order_db.db_host,dbname=order.order_db.db_name,
+                                    user=order.order_db.db_user,passwd=order.order_db.db_passwd,
+                                    port=order.order_db.db_port,sql=filePath
+                                    )
+                if rc == 0:
+                    order.order_status = 2
+                    order.save()                     
+                    sendSqlNotice.delay(order.id,mask='【已执行】')
+                    return JsonResponse({'msg':"SQL执行成功","code":200,'data':rs}) 
                 else:
-                    return JsonResponse({'msg':result.get('errinfo'),"code":500,'data':[]}) 
-            except Exception, ex:
-                return JsonResponse({'msg':str(ex),"code":200,'data':[]})  
+                    order.order_status = 7
+                    order.save()                     
+                    sendSqlNotice.delay(order.id,mask='【已失败】')
+                    return JsonResponse({'msg':"SQL执行失败：{rs}".format(rs=str(rs)),"code":500,'data':[]})   
             
         elif  request.POST.get('type') == 'rollback' and order.order_status == 2 and order.prem == 1: 
             rollBackSql = []  
@@ -330,6 +381,7 @@ def db_sql_control(request):
                                                             )
                 return JsonResponse({'msg':"修改成功","code":200,'data':[]})
             except Exception, ex:
+                logger.error(msg="更新数据表[opsmanage_sql_audit_control]错误: {ex}".format(ex=str(ex)))
                 return JsonResponse({'msg':"修改失败："+str(ex),"code":500,'data':[]}) 
         else:
             try:
@@ -344,6 +396,7 @@ def db_sql_control(request):
                                                 )   
                 return JsonResponse({'msg':"修改成功","code":200,'data':[]})
             except Exception,ex:
+                logger.error(msg="写入数据表[opsmanage_sql_audit_control]错误: {ex}".format(ex=str(ex)))
                 return JsonResponse({'msg':"修改失败: "+str(ex),"code":500,'data':[]}) 
             
 @login_required()
@@ -398,6 +451,10 @@ def db_sqlorder_search(request):
             else:order_env='<span class="label label-success">生产环境</span>'
             order_env = '''<td class="text-center">{order_env}</td>'''.format(order_env=order_env)
             order_db = '''<td class="text-center">{order_db}</td>'''.format(order_db=ds.order_db.db_host + '-' + ds.order_db.db_name)
+            if ds.order_type=='file' and ds.order_file:
+                filePath = os.getcwd() + '/upload/' + str(ds.order_file)
+                with open(filePath, 'r') as f:
+                    ds.order_sql = f.read(100) 
             order_sql = """<td class="text-center"> 
                             <a href="/db/sql/order/run/{ds_id}/" target="_blank" class="tooltip-test" data-toggle="tooltip" title="{order_sql}">{ds_order_sql}...</a>
                         </td>""".format(ds_id=ds.id,order_sql=ds.order_sql,ds_order_sql=ds.order_sql[0:10])            

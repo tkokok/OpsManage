@@ -1,3 +1,5 @@
+#!/usr/bin/env python  
+# _#_ coding:utf-8 _*_ 
 """
 Django settings for OpsManage project.
 
@@ -97,6 +99,8 @@ INSTALLED_APPS = (
     'rest_framework',
     'djcelery',
     'channels',
+    'elfinder',
+    'storages',
 )
 
 MIDDLEWARE_CLASSES = (
@@ -160,23 +164,7 @@ DATABASES = {
 }
 
 
-# Password validation
-# https://docs.djangoproject.com/en/1.9/ref/settings/#auth-password-validators
 
-# AUTH_PASSWORD_VALIDATORS = [
-#     {
-#         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-#     },
-#     {
-#         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-#     },
-#     {
-#         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-#     },
-#     {
-#         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-#     },
-# ]
 
 
 # Internationalization
@@ -185,24 +173,19 @@ LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'Asia/Shanghai'
 
-# USE_I18N = True
-# 
-# USE_L10N = True
-
-# USE_TZ = False
-
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/1.8/howto/static-files/
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = (
      '/mnt/OpsManage/OpsManage/static/',
     )
-# TEMPLATE_DIRS = (
-# #     os.path.join(BASE_DIR,'mysite\templates'),
-#     '/mnt/OpsManage/OpsManage/templates/',
-# )
 
+MEDIA_ROOT = os.path.join(BASE_DIR,'upload/')
+MEDIA_URL = '/upload/'
+SFTP_CONF = {
+             'port':22,
+             'username':'root',
+             'password':'welliam',
+             'timeout':30
+             }  #修改成能sftp登陆OpsManage的账户
 
 LOGIN_URL = '/login'
