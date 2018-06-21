@@ -82,7 +82,7 @@ def deploy_modf(request,pid):
     try:
         project = Project_Config.objects.select_related().get(id=pid)
         tagret_server = Project_Number.objects.filter(project=project)
-        serverList = [ s.server_assets for s in Assets.objects.filter(project=project.project.id) ]
+        serverList = [ s.server_assets for s in Assets.objects.filter(project=project.project.id,assets_type__in=['server','vmser']) ]
     except Exception, ex:
         logger.error(msg="修改项目失败: {ex}".format(ex=ex))
         return render(request,'deploy/deploy_modf.html',{"user":request.user,
@@ -270,7 +270,7 @@ def deploy_run(request,pid):
                 base.mkdir(dirPath=trueDir)
                 DsRedis.OpsDeploy.lpush(project.project_uuid, data="[Running] Mkdir version dir: {dir} ".format(dir=trueDir))
                 #创建快捷方式
-                softdir = project.project_dir+project.project.project_name+'/'
+                softdir = project.project_dir+project.project_name+'/'
                 result = base.lns(spath=trueDir, dpath=softdir.rstrip('/'))
                 DsRedis.OpsDeploy.lpush(project.project_uuid, data="[Running] Make softlink cmd:  ln -s  {sdir} {ddir} info: {info}".format(sdir=trueDir,ddir=softdir,info=result[1]))
                 if result[0] > 0:return JsonResponse({'msg':result[1],"code":500,'data':[]})    
@@ -305,7 +305,7 @@ def deploy_run(request,pid):
                 base.mkdir(dirPath=trueDir)
                 DsRedis.OpsDeploy.lpush(project.project_uuid, data="[Running] Mkdir version dir: {dir} ".format(dir=trueDir))
                 #创建快捷方式
-                softdir = project.project_dir+project.project.project_name+'/'
+                softdir = project.project_dir+project.project_name+'/'
                 result = base.lns(spath=trueDir, dpath=softdir.rstrip('/'))
                 DsRedis.OpsDeploy.lpush(project.project_uuid, data="[Running] Make softlink cmd:  ln -s  {sdir} {ddir} info: {info}".format(sdir=trueDir,ddir=softdir,info=result[1]))
                 if result[0] > 0:return JsonResponse({'msg':result[1],"code":500,'data':[]})      
