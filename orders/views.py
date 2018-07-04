@@ -240,8 +240,7 @@ def order_list(request,page):
         except PageNotAnInteger:
             orderList = paginator.page(1)
         except EmptyPage:
-            orderList = paginator.page(paginator.num_pages) 
-        print orderRbt.getMonthOrderCount()       
+            orderList = paginator.page(paginator.num_pages)      
         return render(request,'orders/order_list.html',{"user":request.user,"orderList":orderList,
                                                         "orderType":orderType,"monthDataList":orderRbt.getMonthOrderCount(),
                                                         "codeDataList":orderRbt.getOrderCount(type=1, day=7),"usernameList":usernameList,
@@ -353,7 +352,7 @@ def file_upload_list(request,page):
         except EmptyPage:
             uploadList = paginator.page(paginator.num_pages)                     
         userList = User.objects.filter(is_superuser=1)    
-        serverList = Server_Assets.objects.all()
+        serverList = AssetsSource().serverList()#Server_Assets.objects.all()
         serviceList = Service_Assets.objects.all()
         projectList = Project_Assets.objects.all()
         groupList = Group.objects.all()
@@ -382,7 +381,7 @@ def file_upload_audit(request):
         elif request.POST.get('server_model') == 'group':
             serverList = AssetsSource().group(group=request.POST.get('group'))[0]
         elif request.POST.get('server_model') == 'custom':
-            serverList = AssetsSource().custom(serverList=request.POST.get('server'))[0]
+            serverList = AssetsSource().custom(serverList=request.POST.get('server').split(','))[0]
         else:
             return JsonResponse({'msg':"参数不正确","code":500}) 
         try:
@@ -431,7 +430,7 @@ def file_download_list(request,page):
         except EmptyPage:
             uploadList = paginator.page(paginator.num_pages)                     
         userList = User.objects.filter(is_superuser=1)    
-        serverList = Server_Assets.objects.all()
+        serverList = AssetsSource().serverList()#Server_Assets.objects.all()
         serviceList = Service_Assets.objects.all()
         projectList = Project_Assets.objects.all()
         groupList = Group.objects.all()
@@ -459,7 +458,7 @@ def file_download_audit(request):
         elif request.POST.get('server_model') == 'group':
             serverList = AssetsSource().group(group=request.POST.get('group'))[0]
         elif request.POST.get('server_model') == 'custom':
-            serverList = AssetsSource().custom(serverList=request.POST.get('server'))[0]
+            serverList = AssetsSource().custom(serverList=request.POST.get('server').split(','))[0]
         else:
             return JsonResponse({'msg':"参数不正确","code":500}) 
         try:

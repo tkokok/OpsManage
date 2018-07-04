@@ -86,8 +86,9 @@ class ProjectConfigSerializer(serializers.ModelSerializer):
         model = Project_Config
         fields = ('id','project_env','project_name','project_local_command',
                   'project_repo_dir','project_dir','project_exclude',
-                  'project_address','project_repertory','project_status',
-                  'project_remote_command','project_number')   
+                  "project_type",'project_address','project_repertory',
+                  'project_status','project_remote_command','project_user',
+                  'project_uuid','project_number')   
 
 class DeployLogsSerializer(serializers.ModelSerializer):
     class Meta:
@@ -230,4 +231,9 @@ class UploadFilesOrderSerializer(serializers.ModelSerializer):
 class DownloadFilesSerializer(serializers.ModelSerializer):
     class Meta:
         model = FileDownload_Audit_Order
-        fields = ('id','order_content', 'dest_server','dest_path')        
+        fields = ('id','order_content', 'dest_server','dest_path') 
+        
+class AnsibleInventorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Ansible_Inventory
+        fields = ('id','name', 'desc','user') 
